@@ -49,9 +49,12 @@ partial-encryption-via-segmentation/
 ```
 
 ## 1. Setting up the repository
-
-
 Follow these steps in your Linux terminal (or WSL Ubuntu terminal):
+
+Go to your folder directory (example):
+```bash
+ cd /mnt/c/Users/<your_user_name>/Desktop/<your_folder_name>
+```
 
 ### Step 1: Install Essential System Dependencies
 
@@ -116,20 +119,28 @@ pip install numpy Pillow cryptography
 
 The `charm-crypto` source code is included directly within this repository. You'll compile and install it within your virtual environment.
 
-**i. Navigate into the charm directory:**
+
+
+**i. Download the charm library:**
+
+```bash
+git clone https://github.com/JHUISI/charm.git
+```
+
+**ii. Navigate into the charm directory:**
 
 ```bash
 cd charm/
 ```
 
-**ii. Ensure `configure.sh` is executable and has correct line endings:**
+**iii. Ensure `configure.sh` is executable and has correct line endings:**
 
 ```bash
 chmod +x configure.sh
 dos2unix configure.sh
 ```
 
-**iii. Run the configuration script and install `charm-crypto`:**
+**iv. Run the configuration script and install `charm-crypto`:**
 
 This process involves compilation and may take several minutes.
 
@@ -138,7 +149,7 @@ This process involves compilation and may take several minutes.
 pip install .
 ```
 
-**iv. Return to the main project directory:**
+**v. Return to the main project directory:**
 
 ```bash
 cd ..
@@ -153,6 +164,14 @@ With all dependencies installed and the environment correctly set up, you can no
 ```bash
 python3 scripts/enc-dec.py
 ```
+
+If it gives libpbc.so.1 error:
+
+```bash
+export LD_LIBRARY_PATH=/home/linuxbrew/.linuxbrew/lib:/usr/local/lib:$LD_LIBRARY_PATH
+python3 scripts/enc-dec.py
+```
+
 
 #### Important Parameters for `enc-dec.py`
 
@@ -251,5 +270,4 @@ Exit the virtual environment.
 ```bash
 deactivate
 ```
-
 
