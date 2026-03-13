@@ -10,11 +10,12 @@
 #   ./run.sh 2017_10130708.jpg real
 # =============================================================
 
-set -e  # exit immediately on any error
+# Always run from the directory where run.sh lives
+cd "$(dirname "$(readlink -f "$0")")"
 
 # ── Arguments ─────────────────────────────────────────────────
 IMAGE_FILENAME="${1}"
-SCORE_MODE="${2:-synthetic}"  # default: synthetic
+SCORE_MODE="${2:-synthetic}"
 
 if [ -z "$IMAGE_FILENAME" ]; then
     echo "Usage: ./run.sh <image_filename> [real|synthetic]"
@@ -25,7 +26,6 @@ if [ -z "$IMAGE_FILENAME" ]; then
     exit 1
 fi
 
-# Resolve real-scores flag
 if [ "$SCORE_MODE" = "real" ]; then
     REAL_SCORES="true"
 else
@@ -33,7 +33,8 @@ else
 fi
 
 IMAGE_PATH="data/samples/${IMAGE_FILENAME}"
-IMAGE_ID="${IMAGE_FILENAME%.*}"  # strip extension
+IMAGE_ID="${IMAGE_FILENAME%.*}"
+DETECTION_FILE="data/detections/${IMAGE_ID}.txt"
 
 # ── Checks ────────────────────────────────────────────────────
 if [ ! -f "$IMAGE_PATH" ]; then
@@ -47,15 +48,35 @@ echo "  Image     : $IMAGE_FILENAME"
 echo "  Scores    : $SCORE_MODE"
 echo "============================================"
 
-# ── Stage 1: Detection ────────────────────────────────────────
-echo ""
-echo "[ Stage 1 / 2 ] Running detection..."
-echo ""
+# ── Stage 1: Detection (skip if .txt already exists) ──────────
+if [ -f "$DETECTION_FILE" ]; then
+    echo ""
+    echo "[ Stage 1 / 2 ] Detection file already exists, skipping."
+    echo "  → ${DETECTION_FILE}"
+else
+    echo ""
+    echo "[ Stage 1 / 2 ] Running detection..."
+    echo ""
 
-IMAGE="$IMAGE_FILENAME" USE_REAL_SCORES="$REAL_SCORES" docker-compose up detect
+    docker-compose down --remove-orphans 2>/dev/null || true
+    IMAGE="$IMAGE_FILENAME" USE_REAL_SCORES="$REAL_SCORES" docker-compose up detect
 
-echo ""
-echo "[ Stage 1 / 2 ] Detection complete."
+    if [ ! -f "$DETECTION_FILE" ]; then
+        echo ""
+        echo "============================================"
+        echo "  ERROR: Detection failed."
+        echo "  No detections file found at:"
+        echo "  ${DETECTION_FILE}"
+        echo ""
+        echo "  Model weights are required to run detection."
+        echo "  See README.md -> Prerequisites -> Model weights"
+        echo "============================================"
+        exit 1
+    fi
+
+    echo ""
+    echo "[ Stage 1 / 2 ] Detection complete."
+fi
 
 # ── Stage 2: Encryption + Decryption ─────────────────────────
 echo ""
