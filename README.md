@@ -16,7 +16,7 @@ The pipeline has two stages that run in separate Docker containers:
       │
       ▼
 ┌─────────────────────┐        shared volume
-│   ml-container      │   data/detections/<id>.json
+│   ml-container      │   data/detections/<id>.txt
 │   detect.py         │ ──────────────────────────────►
 │                     │
 │  OCR → DeBERTa      │   textual PSOs   (bounding boxes)
@@ -43,14 +43,6 @@ The two stages are intentionally separated because `charm-crypto` (ABE) and the 
 
 ---
 
-## Prerequisites
-
-- [Docker](https://docs.docker.com/get-docker/) installed and running
-- **WSL (Ubuntu)** if you are on Windows — all commands below should be run inside WSL, not PowerShell or CMD
-- The `models/` folder populated with fine-tuned weights (see Datasets & Training below)
-
----
-
 ## Project structure
 
 ```
@@ -66,7 +58,7 @@ ml-assisted-access-control/
 │   ├── samples/                # Input images go here
 │   └── detections/             # JSON output from detect.py (auto-created)
 │
-├── models/                     # Fine-tuned model weights (not in Git)
+├── models/                     # Fine-tuned model weights (not in Git, see below)
 │   ├── multimodal/
 │   │   ├── yolov8l_multimodal/weights/best.pt
 │   │   └── deberta_multimodal/
@@ -92,27 +84,42 @@ ml-assisted-access-control/
 
 ---
 
-## Datasets & Training
+## Prerequisites
 
-The models used in this project were trained on three datasets:
+### 1. Docker
 
-| Modality | Dataset | Link |
-|---|---|---|
-| Visual (segmentation) | VISPR-Redactions | [Kaggle](https://www.kaggle.com/datasets/meteharunakcay/visual-redactions) |
-| Textual (classification) | OCR-extracted from VISPR-Redactions | [Google Drive](https://drive.google.com/file/d/1g4uV7fLXCiVSXBlFK8Mf4G0O52S3XCSk/view?usp=drive_link) |
-| Multimodal (object detection) | VISPR-Redactions (multimodal subset) | [Kaggle](https://www.kaggle.com/datasets/harunakay/multimodal) |
+Install [Docker](https://docs.docker.com/get-docker/) and make sure it is running.
 
-Training notebooks for all three modalities are in the `train/` folder. These are Kaggle notebooks and were run on Kaggle's T4x2 GPUs.
-
----
-
-## Running the pipeline
-
-### Step 0: Navigate to the project root in WSL
+If you are on **Windows**, all commands must be run inside **WSL (Ubuntu)**, not PowerShell or CMD. Open WSL and navigate to the project:
 
 ```bash
 cd /mnt/c/Users/<your_username>/Desktop/ml-assisted-access-control
 ```
+
+### 2. Model weights
+
+The `models/` folder must be populated with fine-tuned weights before running the pipeline. The models are **not included in this repository** due to file size. Download them and place them in the correct paths:
+
+| Model | Purpose | Expected path |
+|---|---|---|
+| YOLOv8-Seg (visual) | Detects faces, persons, signatures, etc. | `models/visual/yolo_only_visuals_augmented_100/weights/best.pt` |
+| YOLOv8 (multimodal) | Detects ID cards, passports, receipts, etc. | `models/multimodal/yolov8l_multimodal/weights/best.pt` |
+| DeBERTa (multimodal) | CAPC post-correction for multimodal PSOs | `models/multimodal/deberta_multimodal/` |
+| DeBERTa (textual) | Classifies OCR-extracted text regions | `models/textual/deberta/` |
+
+The DeBERTa folders must contain the standard HuggingFace model files: `config.json`, `pytorch_model.bin`, `tokenizer_config.json`, `tokenizer.json`, `special_tokens_map.json`.
+
+The models were trained on the datasets below. Training notebooks are in the `train/` folder and were run on Kaggle's T4x2 GPUs.
+
+| Modality | Dataset | Link |
+|---|---|---|
+| Visual | VISPR-Redactions | [Kaggle](https://www.kaggle.com/datasets/meteharunakcay/visual-redactions) |
+| Textual | OCR-extracted from VISPR-Redactions | [Google Drive](https://drive.google.com/file/d/1g4uV7fLXCiVSXBlFK8Mf4G0O52S3XCSk/view?usp=drive_link) |
+| Multimodal | VISPR-Redactions (multimodal subset) | [Kaggle](https://www.kaggle.com/datasets/harunakay/multimodal) |
+
+---
+
+## Running the pipeline
 
 ### Step 1: Build the Docker images
 
@@ -146,7 +153,7 @@ The first line strips Windows line endings from the script, which cause a `bad i
 ```
 
 The image must be inside `data/samples/`. The script will:
-1. Run detection and write `data/detections/your_image.json`
+1. Run detection and write `data/detections/your_image.txt`
 2. Encrypt the image and save `outputs/your_image_encrypted.png`
 3. Prompt you for an ABE key to decrypt with
 
@@ -188,7 +195,7 @@ C:\Users\<your_username>\Desktop\ml-assisted-access-control\outputs\
 
 ## Running a different image
 
-Just pass a different filename — detection results are cached per image in `data/detections/` so if you have already run detection on an image before, the script skips straight to encryption:
+Just pass a different filename. Detection results are cached per image in `data/detections/` so if you have already detected an image before, the script skips straight to encryption:
 
 ```bash
 ./run.sh another_image.jpg
@@ -198,14 +205,17 @@ Just pass a different filename — detection results are cached per image in `da
 
 ## Troubleshooting
 
-**`Network needs to be recreated` error**
+**Detection fails with `No file named pytorch_model.bin found in directory`**  
+The model weights are missing. See Prerequisites → Model weights above and make sure all four models are downloaded and placed in the correct paths before running.
+
+**`Network needs to be recreated` error**  
+`run.sh` handles this automatically by running `docker-compose down` before each detection stage. If you see it outside of `run.sh`, run:
 ```bash
 docker-compose down
-./run.sh your_image.jpg
 ```
 
-**`No such file or directory` for the detection JSON**  
-Detection did not finish before encryption started. This should not happen when using `run.sh` since it runs the two stages sequentially. If running stages manually, always wait for `[SAVED] N detections →` to appear in the detect logs before running encryption.
+**`No such file or directory` for the detection file**  
+Detection failed before writing its output. Check the detection logs above the error message — it will tell you exactly what went wrong (usually missing model weights).
 
 **`libpbc.so.1` not found**  
 This should not happen inside Docker as `libpbc` is compiled at image build time. If it occurs when running scripts directly outside Docker:
@@ -213,16 +223,21 @@ This should not happen inside Docker as `libpbc` is compiled at image build time
 export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 ```
 
-**PaddleOCR model download is slow**  
-PaddleOCR downloads its weights on first run (~16 MB total). These are cached inside the container's filesystem. If you want to persist them across container restarts, add a volume mount for `/root/.paddleocr` in `docker-compose.yml`.
+**PaddleOCR downloads models on every run**  
+PaddleOCR caches weights inside the container filesystem, which is discarded when the container stops. To persist the cache across runs, add this volume to the `detect` service in `docker-compose.yml`:
+```yaml
+- paddleocr-cache:/root/.paddleocr
+```
+And add at the bottom of the file:
+```yaml
+volumes:
+  paddleocr-cache:
+```
 
-**Shell lost current directory (`No such file or directory` on `os.getcwd()`)**  
+**Shell lost current directory (`No such file or directory` on `os.getcwd()`)**
 ```bash
 cd /mnt/c/Users/<your_username>/Desktop/ml-assisted-access-control
 ```
-
-**`libgl1-mesa-glx` not found during build**  
-This package was removed in Debian trixie. Make sure your `Dockerfile.ml` uses `libgl1` instead of `libgl1-mesa-glx`.
 
 ---
 
@@ -260,7 +275,7 @@ Note: `docker-compose up encrypt` is not used for the encryption stage because `
 python src/detect.py --image PATH [--output-dir DIR] [--model-dir DIR] [--real-scores BOOL]
 
   --image         Path to the input image (required)
-  --output-dir    Where to write the detection JSON (default: data/detections/)
+  --output-dir    Where to write the detection file (default: data/detections/)
   --model-dir     Root dir containing the models/ folder (default: project root)
   --real-scores   true | false  (default: false)
 ```
@@ -272,7 +287,7 @@ python src/enc_dec.py --image PATH [--detections DIR] [--output-dir DIR]
                       [--real-scores BOOL] [--privacy-levels N]
 
   --image           Path to the input image (required)
-  --detections      Directory containing the JSON from detect.py (default: data/detections/)
+  --detections      Directory containing the .txt file from detect.py (default: data/detections/)
   --output-dir      Where to write output images (default: outputs/)
   --real-scores     true | false  (default: false) — must match what was used in detect.py
   --privacy-levels  Number of sensitivity groups (default: 4)
@@ -282,25 +297,18 @@ python src/enc_dec.py --image PATH [--detections DIR] [--output-dir DIR]
 
 ## Detection metadata format
 
-`detect.py` writes one JSON file per image to `data/detections/`. Each entry represents one detected PSO:
+`detect.py` writes one `.txt` file per image to `data/detections/`. Each line represents one detected PSO in the format:
 
-```json
-[
-  {
-    "label": "name",
-    "type": "textual",
-    "confidence": 0.94,
-    "privacy_score": 0.7,
-    "box": [[120, 45], [310, 45], [310, 68], [120, 68]]
-  },
-  {
-    "label": "face",
-    "type": "visual",
-    "confidence": 1.0,
-    "privacy_score": 0.5,
-    "pixels": [[102, 88], [102, 89], "..."]
-  }
-]
+```
+label, confidence, privacy_score, [[coords]], type
+```
+
+For textual and multimodal PSOs, `coords` is a list of 4 corner points. For visual PSOs, `coords` is the full list of pixel coordinates. For example:
+
+```
+name, 0.94, 0.7, [[120, 45], [310, 45], [310, 68], [120, 68]], textual
+face, 1.0, 0.5, [[102, 88], [102, 89], ...], visual
+passport, 0.98, 0.6, [[50, 30], [200, 30], [200, 150], [50, 150]], multimodal
 ```
 
 ---
