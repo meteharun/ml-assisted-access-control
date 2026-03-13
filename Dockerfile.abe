@@ -1,0 +1,53 @@
+# ============================================================
+# Dockerfile.abe  —  Encryption / Decryption container
+# Contains: charm-crypto (compiled at build time), cryptography
+# ============================================================
+FROM python:3.10-slim
+
+# System dependencies required to compile charm-crypto
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libgmp-dev \
+    libssl-dev \
+    libsodium-dev \
+    flex \
+    bison \
+    wget \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Build and install libpbc from source (charm-crypto dependency)
+# This permanently fixes the libpbc.so.1 error mentioned in the README
+RUN wget -q https://crypto.stanford.edu/pbc/files/pbc-0.5.14.tar.gz && \
+    tar -xzf pbc-0.5.14.tar.gz && \
+    cd pbc-0.5.14 && \
+    ./configure && \
+    make && \
+    make install && \
+    ldconfig && \
+    cd .. && \
+    rm -rf pbc-0.5.14 pbc-0.5.14.tar.gz
+
+WORKDIR /app
+
+# Install Python dependencies
+RUN pip install --upgrade pip && \
+    pip install numpy Pillow cryptography
+
+# Clone and compile charm-crypto at build time
+# This means end users never need to run ./configure.sh manually
+RUN git clone https://github.com/JHUISI/charm.git /tmp/charm && \
+    cd /tmp/charm && \
+    ./configure.sh && \
+    pip install . && \
+    rm -rf /tmp/charm
+
+# Copy source code
+COPY src/ /app/src/
+
+# Data directories are mounted at runtime via docker-compose
+# /app/data/samples     — input images  (shared volume, read)
+# /app/data/detections  — input JSON    (shared volume, read)
+# /app/outputs          — output images (shared volume, write)
+
+CMD ["python", "src/enc_dec.py", "--help"]

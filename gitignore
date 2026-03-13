@@ -1,0 +1,26 @@
+# Virtual environments (legacy local setup)
+abe-env/
+ml-env/
+
+# Docker build cache (not needed in repo)
+.docker/
+
+# Model weights — too large for Git, use DVC or manual download
+models/
+
+# Generated outputs
+outputs/
+data/detections/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db

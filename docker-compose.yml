@@ -1,0 +1,67 @@
+# ============================================================
+# docker-compose.yml
+#
+# Two-container pipeline:
+#   1. detect   — runs detect.py, writes JSON to data/detections/
+#   2. encrypt  — runs enc_dec.py, reads JSON, writes to outputs/
+#
+# Usage:
+#   Full pipeline (detect then encrypt):
+#     IMAGE=2017_13079119.jpg docker-compose up --build
+#
+#   Detection only:
+#     IMAGE=2017_13079119.jpg docker-compose up detect
+#
+#   Encryption only (detections already exist):
+#     IMAGE=2017_13079119.jpg docker-compose up encrypt
+#
+#   Use real privacy scores from user study:
+#     IMAGE=2017_13079119.jpg USE_REAL_SCORES=true docker-compose up
+# ============================================================
+
+version: "3.9"
+
+services:
+
+  # ----------------------------------------------------------
+  # Stage 1: Detection & Classification
+  # ----------------------------------------------------------
+  detect:
+    build:
+      context: .
+      dockerfile: Dockerfile.ml
+    image: pesto-pacman-ml
+    volumes:
+      - ./data:/app/data          # samples/ read, detections/ write
+      - ./models:/app/models:ro   # model weights, read-only
+    environment:
+      - IMAGE_FILENAME=${IMAGE:-2017_13079119.jpg}
+      - USE_REAL_SCORES=${USE_REAL_SCORES:-false}
+    command: >
+      python src/detect.py
+        --image /app/data/samples/${IMAGE:-2017_13079119.jpg}
+        --output-dir /app/data/detections
+        --real-scores ${USE_REAL_SCORES:-false}
+
+  # ----------------------------------------------------------
+  # Stage 2: Encryption / Decryption
+  # ----------------------------------------------------------
+  encrypt:
+    build:
+      context: .
+      dockerfile: Dockerfile.abe
+    image: pesto-pacman-abe
+    volumes:
+      - ./data:/app/data          # detections/ read, samples/ read
+      - ./outputs:/app/outputs    # encrypted/decrypted images written here
+    environment:
+      - IMAGE_FILENAME=${IMAGE:-2017_13079119.jpg}
+      - USE_REAL_SCORES=${USE_REAL_SCORES:-false}
+    command: >
+      python src/enc_dec.py
+        --image /app/data/samples/${IMAGE:-2017_13079119.jpg}
+        --detections /app/data/detections
+        --output-dir /app/outputs
+        --real-scores ${USE_REAL_SCORES:-false}
+    depends_on:
+      - detect

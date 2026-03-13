@@ -1,273 +1,325 @@
-# Partial Encryption via Segmentation
+# ML-Assisted Access Control
 
-This branch of the repository contains the full pipeline for **ML-assisted access control**, consisting of two major components:
+This is the official repository for the paper:  
+**[From See to Shield: ML-Assisted Fine-Grained Access Control for Visual Data](https://arxiv.org/abs/2510.19418)** (Akcay et al., 2025)
 
-- **Detection of private regions(`ml-env`)**: Used for running segmentation, object detection and OCR + text classification.  
-  - script: `scripts/detect.py`
+Full implementation details, experimental setup, and results are described in the paper.
 
-- **Attribute-Based Encryption (`abe-env`)**: Used for encrypting/decrypting detected private regions using Charm-Crypto.  
-  - script: `scripts/enc-dec.py`
+---
 
-⚠️ **Important:** You must use the correct environment depending on which script you want to run.  
-- For detection/classification: activate **`ml-env`**  
-- For encryption/decryption: activate **`abe-env`**
+## How it works
+
+The pipeline has two stages that run in separate Docker containers:
+
+```
+[Input Image]
+      │
+      ▼
+┌─────────────────────┐        shared volume
+│   ml-container      │   data/detections/<id>.json
+│   detect.py         │ ──────────────────────────────►
+│                     │
+│  OCR → DeBERTa      │   textual PSOs   (bounding boxes)
+│  YOLOv8 → CAPC      │   multimodal PSOs (bounding boxes)
+│  YOLOv8-Seg         │   visual PSOs    (pixel masks)
+└─────────────────────┘
+                                          │
+                                          ▼
+                               ┌─────────────────────┐
+                               │   abe-container      │
+                               │   enc_dec.py         │
+                               │                      │
+                               │  Fernet (AES) per    │
+                               │  sensitivity group   │
+                               │  wrapped under ABE   │
+                               └─────────────────────┘
+                                          │
+                                          ▼
+                               outputs/<id>_encrypted.png
+                               outputs/<id>_decrypted_abekey<N>.png
+```
+
+The two stages are intentionally separated because `charm-crypto` (ABE) and the ML stack (PyTorch, PaddleOCR, YOLO) have incompatible dependencies and cannot share a single environment.
+
+---
 
 ## Prerequisites
 
-- **Operating System:** A Linux-based environment is highly recommended for this project, especially due to `charm-crypto`'s compilation requirements.
-- **If on Windows:** Please ensure you have Windows Subsystem for Linux (WSL) with an Ubuntu distribution properly installed and configured. All commands below should be run within your WSL Ubuntu terminal.
-- **Git:** Git must be installed on your system (or within your WSL environment).
+- [Docker](https://docs.docker.com/get-docker/) installed and running
+- **WSL (Ubuntu)** if you are on Windows — all commands below should be run inside WSL, not PowerShell or CMD
+- The `models/` folder populated with fine-tuned weights (see Datasets & Training below)
 
 ---
 
-## Project Folder Structure
+## Project structure
 
-The repository is organized as follows:
-
-```plaintext
-partial-encryption-via-segmentation/
+```
+ml-assisted-access-control/
 │
-├── abe-env/              # Virtual environment for encryption/decryption (not pushed to Git)
-├── ml-env/               # Virtual environment for detection/classification (not pushed to Git)
-├── charm/                # Source code for Charm-Crypto (needed to compile/install)
+├── src/                        # All Python source code
+│   ├── __init__.py
+│   ├── abe.py                  # ABE wrapper (charm-crypto)
+│   ├── detect.py               # Detection & classification pipeline
+│   └── enc_dec.py              # Encryption / decryption pipeline
 │
-├── data/                 # Dataset files (images, annotations, etc.)
-├── detections/           # Output detections from YOLO/PaddleOCR pipeline
-├── models/               # Pretrained or fine-tuned models (YOLO, DeBERTa, etc.)
-├── notebooks/            # Jupyter notebooks for experiments and prototyping
-├── outputs/              # Generated results, logs, visualizations
-├── scripts/              # Main scripts for running the pipeline
-│   ├── detect.py         # Detection + OCR + classification pipeline (uses `ml-env`)
-│   ├── enc-dec.py        # Encryption/decryption pipeline (uses `abe-env`)
-│   └── ...               # Other helper scripts
-├── train/                # Training scripts and configurations
+├── data/
+│   ├── samples/                # Input images go here
+│   └── detections/             # JSON output from detect.py (auto-created)
 │
-├── reqs_abe.txt      # Dependency list for `abe-env`
-├── reqs_ml.txt  # (Optional) Dependency list for `ml-env`
-├── README.md             # Project documentation
-└── .gitignore            # Ignored files and folders (envs, cache, etc.)
-```
-
-## 1. Setting up the repository
-Follow these steps in your Linux terminal (or WSL Ubuntu terminal):
-
-Go to your folder directory (example):
-```bash
- cd /mnt/c/Users/<your_user_name>/Desktop/<your_folder_name>
-```
-
-### Step 1: Install Essential System Dependencies
-
-These packages provide build tools, Python utilities, and cryptographic libraries necessary for the project, especially for compiling `charm-crypto`.
-
-```bash
-sudo apt update
-sudo apt install python3 python3-venv python3-pip git build-essential libgmp-dev libssl-dev libsodium-dev dos2unix
-```
-
-- `build-essential`: Provides core C/C++ compilation tools (`gcc`, `g++`, `make`).
-- `libgmp-dev`, `libssl-dev`, `libsodium-dev`: Cryptographic and general development libraries required by `charm-crypto`.
-- `dos2unix`: A utility to convert Windows-style line endings to Unix-style, crucial for shell scripts.
-
----
-
-### Step 2: Clone the Project Repository
-
-Clone the specific `full_pipeline` branch of the repository.
-
-```bash
-git clone -b full_pipeline https://gitlabe2.ext.net.nokia.com/network-security/ai-ml-security/partial-encryption-via-segmentation.git
-
+├── models/                     # Fine-tuned model weights (not in Git)
+│   ├── multimodal/
+│   │   ├── yolov8l_multimodal/weights/best.pt
+│   │   └── deberta_multimodal/
+│   ├── visual/
+│   │   └── yolo_only_visuals_augmented_100/weights/best.pt
+│   └── textual/
+│       └── deberta/
+│
+├── notebooks/                  # Data analysis & experimentation notebooks
+├── train/                      # Kaggle notebooks used to train the models
+│                               # (segmentation, object detection, text classification)
+├── outputs/                    # Encrypted & decrypted images (auto-created)
+│
+├── run.sh                      # One-command pipeline runner
+├── Dockerfile.ml               # Container for detect.py
+├── Dockerfile.abe              # Container for enc_dec.py
+├── docker-compose.yml          # Defines both services and shared volumes
+│
+├── reqs_ml.txt                 # ML environment dependencies (reference)
+├── reqs_abe.txt                # ABE environment dependencies (reference)
+└── .gitignore
 ```
 
 ---
 
-### Step 3: Navigate to the Project Directory
+## Datasets & Training
 
-Enter the newly cloned project folder.
+The models used in this project were trained on three datasets:
 
-```bash
-cd partial-encryption-via-segmentation
-```
+| Modality | Dataset | Link |
+|---|---|---|
+| Visual (segmentation) | VISPR-Redactions | [Kaggle](https://www.kaggle.com/datasets/meteharunakcay/visual-redactions) |
+| Textual (classification) | OCR-extracted from VISPR-Redactions | [Google Drive](https://drive.google.com/file/d/1g4uV7fLXCiVSXBlFK8Mf4G0O52S3XCSk/view?usp=drive_link) |
+| Multimodal (object detection) | VISPR-Redactions (multimodal subset) | [Kaggle](https://www.kaggle.com/datasets/harunakay/multimodal) |
 
-## 2. Setting up `abe-env`
-
-
-### Step 1: Create and Activate a New Virtual Environment
-
-
-```bash
-python3 -m venv abe-env
-source abe-env/bin/activate
-```
-
-You should now see `(abe-env)` at the beginning of your terminal prompt, indicating that your virtual environment is active.
+Training notebooks for all three modalities are in the `train/` folder. These are Kaggle notebooks and were run on Kaggle's T4x2 GPUs.
 
 ---
 
-### Step 2: Install Required Python Packages
+## Running the pipeline
 
-First, install the standard Python libraries. Then, install `charm-crypto` from the source code included in the repository.
-
-#### a. Install General Python Packages:
+### Step 0: Navigate to the project root in WSL
 
 ```bash
-pip install numpy Pillow cryptography
+cd /mnt/c/Users/<your_username>/Desktop/ml-assisted-access-control
 ```
 
-#### b. Install charm-crypto from Source:
+### Step 1: Build the Docker images
 
-The `charm-crypto` source code is included directly within this repository. You'll compile and install it within your virtual environment.
-
-
-
-**i. Download the charm library:**
+Only needed once, or after you change a Dockerfile or anything in `src/`:
 
 ```bash
-git clone https://github.com/JHUISI/charm.git
+docker-compose build
 ```
 
-**ii. Navigate into the charm directory:**
+This builds two images:
+- `pesto-pacman-ml` — installs PyTorch, PaddleOCR, YOLO, DeBERTa
+- `pesto-pacman-abe` — compiles `libpbc` and `charm-crypto` from source
+
+The first build will take several minutes. Subsequent builds use the Docker cache and are near-instant.
+
+### Step 2: Make the run script executable
+
+Only needed once:
 
 ```bash
-cd charm/
+chmod +x run.sh
 ```
 
-**iii. Ensure `configure.sh` is executable and has correct line endings:**
+### Step 3: Run the pipeline
 
 ```bash
-chmod +x configure.sh
-dos2unix configure.sh
+./run.sh your_image.jpg
 ```
 
-**iv. Run the configuration script and install `charm-crypto`:**
+The image must be inside `data/samples/`. The script will:
+1. Run detection and write `data/detections/your_image.json`
+2. Encrypt the image and save `outputs/your_image_encrypted.png`
+3. Prompt you for an ABE key to decrypt with
 
-This process involves compilation and may take several minutes.
-
-```bash
-./configure.sh
-pip install .
+When prompted:
+```
+Which key do you have? (abekey1, abekey2, abekey3, abekey4):
 ```
 
-**v. Return to the main project directory:**
+Type one of the four keys and press Enter. Higher keys unlock more sensitive content:
 
+| Key | Sensitivity threshold | Decrypts |
+|---|---|---|
+| `abekey1` | score ≤ 0.25 | Lowest sensitivity only |
+| `abekey2` | score ≤ 0.45 | + faces, license plates |
+| `abekey3` | score ≤ 0.75 | + names, locations, signatures |
+| `abekey4` | score ≤ 1.00 | Everything |
+
+To use real privacy scores from the user study instead of synthetic ones:
 ```bash
-cd ..
+./run.sh your_image.jpg real
+```
+
+> **Note on scores:** Synthetic scores (default) spread objects across all four sensitivity groups, producing better visualisations. Real scores from the user study cluster most objects at high sensitivity.
+
+### Step 4: Find your output images
+
+```
+outputs/
+├── your_image_encrypted.png           ← all PSO regions scrambled
+└── your_image_decrypted_abekey<N>.png ← regions you have access to restored
+```
+
+On Windows these appear at:
+```
+C:\Users\<your_username>\Desktop\ml-assisted-access-control\outputs\
 ```
 
 ---
 
-### Step 3: Run the `enc-dec.py` Script
+## Running a different image
 
-With all dependencies installed and the environment correctly set up, you can now execute the encryption/decryption script.
-
-```bash
-python3 scripts/enc-dec.py
-```
-
-If it gives libpbc.so.1 error:
+Just pass a different filename — detection results are cached per image in `data/detections/` so if you have already run detection on an image before, the script skips straight to encryption:
 
 ```bash
-export LD_LIBRARY_PATH=/home/linuxbrew/.linuxbrew/lib:/usr/local/lib:$LD_LIBRARY_PATH
-python3 scripts/enc-dec.py
+./run.sh another_image.jpg
 ```
-
-
-#### Important Parameters for `enc-dec.py`
-
-- **`is_real`**  
-  - If set to `true`, the program will use scores from the user study.  
-  - ⚠️ These scores are **not ideal for visualizations**.  
-  - For testing whether the program is functioning correctly, it is recommended to set this to `false`.
-
-- **`IMAGE_PATH`**  
-  - Path to the image that will be encrypted.
-
-- **`DET_PATH`**  
-  - Path to the detections file corresponding to the given image.
-
-Exit the virtual environment.
-```bash
-deactivate
-```
-
-## 3. Setting up `ml-env`
-
-
-Follow these steps in your Linux terminal (or WSL Ubuntu terminal):
-
-### Step 1: Create and Activate a New Virtual Environment
-
-
-```bash
-python3 -m venv ml-env
-source ml-env/bin/activate
-```
-
-You should now see `(ml-env)` at the beginning of your terminal prompt, indicating that your virtual environment is active.
 
 ---
 
-### Step 2: Install Required Python Packages
+## Troubleshooting
 
-#### a. Upgrade pip:
-
+**`Network needs to be recreated` error**
 ```bash
-python -m pip install --upgrade pip
+docker-compose down
+./run.sh your_image.jpg
 ```
 
-#### b. Install Dependencies:
+**`No such file or directory` for the detection JSON**  
+Detection did not finish before encryption started. This should not happen when using `run.sh` since it runs the two stages sequentially. If running stages manually, always wait for `[SAVED] N detections →` to appear in the detect logs before running encryption.
 
+**`libpbc.so.1` not found**  
+This should not happen inside Docker as `libpbc` is compiled at image build time. If it occurs when running scripts directly outside Docker:
 ```bash
-pip install matplotlib==3.10.3 opencv-python==4.6.0.66 transformers==4.39.3 sentencepiece==0.2.0 ultralytics==8.3.148 paddlepaddle==2.6.1
-
+export LD_LIBRARY_PATH=/usr/local/lib:$LD_LIBRARY_PATH
 ```
 
+**PaddleOCR model download is slow**  
+PaddleOCR downloads its weights on first run (~16 MB total). These are cached inside the container's filesystem. If you want to persist them across container restarts, add a volume mount for `/root/.paddleocr` in `docker-compose.yml`.
+
+**Shell lost current directory (`No such file or directory` on `os.getcwd()`)**  
 ```bash
-pip install --only-binary=:all: --index-url https://pypi.org/simple "PyMuPDF==1.24.10" "pdf2docx==0.5.8"
+cd /mnt/c/Users/<your_username>/Desktop/ml-assisted-access-control
 ```
 
-```bash
-pip install shapely==2.1.1 imgaug==0.4.0 scikit-image==0.25.2 lmdb==1.7.3 pyclipper==1.3.0.post6 protobuf==3.20.3 visualdl==2.5.3 bce-python-sdk==0.9.46
+**`libgl1-mesa-glx` not found during build**  
+This package was removed in Debian trixie. Make sure your `Dockerfile.ml` uses `libgl1` instead of `libgl1-mesa-glx`.
 
-```
-```bash
-pip install --no-deps paddleocr==2.6.1.3
-```
-```bash
-pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0
+---
 
-```
+## Running stages manually (advanced)
 
+If you need to run detection and encryption separately without using `run.sh`:
+
+**Detection only:**
 ```bash
-pip install --force-reinstall numpy==1.26.4 imgaug==0.4.0
+IMAGE=your_image.jpg docker-compose up detect
 ```
 
-### Step 3. Run the Detection Script:
-
+**Encryption only** (after detection has finished):
 ```bash
-python3 scripts/detect.py
+docker run -it --rm \
+  -v "$(pwd)/data:/app/data" \
+  -v "$(pwd)/outputs:/app/outputs" \
+  pesto-pacman-abe \
+  python src/enc_dec.py \
+    --image /app/data/samples/your_image.jpg \
+    --detections /app/data/detections \
+    --output-dir /app/outputs \
+    --real-scores false
 ```
 
-#### Important Parameters for `detect.py`
+Note: `docker-compose up encrypt` is not used for the encryption stage because `docker-compose up` does not support interactive terminal prompts. The `docker run -it` command is required.
 
-- **`IMAGE_PATH`**  
-  - Path to the image that will be processed for detection.
+---
 
-- **`assign_privacy_scores` function**  
-  - Accepts a boolean parameter (`True` or `False`).  
-  - If set to `True`, privacy scores are assigned based on the user study.  
-  - ⚠️ These scores are **not suitable for visualizations**, so using `False` is recommended for testing and debugging.
+## Script reference
 
-- **Consistency Across Scripts**  
-  - Ideally, the same boolean values should be used in both scripts.  
-  - For example:  
-    - If `assign_privacy_scores(True)` is used in `detect.py`, then `is_real` in `enc-dec.py` should also be set to `True`.  
-    - If `assign_privacy_scores(False)` is used, then `is_real` should also be `False`.
+### `detect.py`
 
+```
+python src/detect.py --image PATH [--output-dir DIR] [--model-dir DIR] [--real-scores BOOL]
 
-Exit the virtual environment.
-```bash
-deactivate
+  --image         Path to the input image (required)
+  --output-dir    Where to write the detection JSON (default: data/detections/)
+  --model-dir     Root dir containing the models/ folder (default: project root)
+  --real-scores   true | false  (default: false)
 ```
 
+### `enc_dec.py`
+
+```
+python src/enc_dec.py --image PATH [--detections DIR] [--output-dir DIR]
+                      [--real-scores BOOL] [--privacy-levels N]
+
+  --image           Path to the input image (required)
+  --detections      Directory containing the JSON from detect.py (default: data/detections/)
+  --output-dir      Where to write output images (default: outputs/)
+  --real-scores     true | false  (default: false) — must match what was used in detect.py
+  --privacy-levels  Number of sensitivity groups (default: 4)
+```
+
+---
+
+## Detection metadata format
+
+`detect.py` writes one JSON file per image to `data/detections/`. Each entry represents one detected PSO:
+
+```json
+[
+  {
+    "label": "name",
+    "type": "textual",
+    "confidence": 0.94,
+    "privacy_score": 0.7,
+    "box": [[120, 45], [310, 45], [310, 68], [120, 68]]
+  },
+  {
+    "label": "face",
+    "type": "visual",
+    "confidence": 1.0,
+    "privacy_score": 0.5,
+    "pixels": [[102, 88], [102, 89], "..."]
+  }
+]
+```
+
+---
+
+## Citation
+
+If you use this code or the datasets in your research, please cite:
+
+```bibtex
+@article{akcay2025shield,
+  title     = {From See to Shield: ML-Assisted Fine-Grained Access Control for Visual Data},
+  author    = {Akcay, Mete Harun and Atli, Buse Gul and Rao, Siddharth Prakash and Bakas, Alexandros},
+  journal   = {arXiv preprint arXiv:2510.19418},
+  year      = {2025}
+}
+```
+
+---
+
+## OS compatibility
+
+- **WSL (Ubuntu) on Windows:** Fully supported and recommended. All commands in this README assume WSL.
+- **Linux:** Fully supported. Commands are identical.
+- **Windows (PowerShell/CMD):** Not recommended. Docker commands differ and path handling is error-prone. Use WSL instead.
+- **macOS:** Docker works. `charm-crypto` compilation on Apple Silicon may require Homebrew-installed `gmp` and `pbc` if running outside Docker.
