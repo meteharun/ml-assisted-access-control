@@ -6,7 +6,7 @@ Runs three detection passes on an input image:
   2. Multimodal: YOLOv8 object detection → DeBERTa CAPC post-correction
   3. Visual   : YOLOv8 instance segmentation → pixel masks
 
-Writes detections to a .txt file in --output-dir.
+Writes detections to a JSON file in --output-dir.
 
 Usage:
     python src/detect.py --image data/samples/img.jpg
@@ -125,12 +125,10 @@ def assign_privacy_scores(detections: list, use_real: bool) -> None:
 
 
 def save_detections(detections: list, output_path: str) -> None:
-    """Save detections to .txt file in original format: label, confidence, privacy_score, [[coords]], type"""
+    """Save detections as JSON (replaces the old eval()-parsed .txt format)."""
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
-        for d in detections:
-            coords = d.get("pixels") if d["type"] == "visual" else d.get("box")
-            f.write(f"{d['label']}, {d['confidence']}, {d['privacy_score']}, {coords}, {d['type']}\n")
+        json.dump(detections, f, indent=2)
     print(f"\n[SAVED] {len(detections)} detections → {output_path}")
 
 
@@ -353,7 +351,7 @@ def run_visual_segmentation(
 def parse_args():
     parser = argparse.ArgumentParser(description="PSO Detection Pipeline")
     parser.add_argument("--image",       required=True,  help="Path to input image")
-    parser.add_argument("--output-dir",  default=None,   help="Directory to write detections .txt (default: data/detections next to image)")
+    parser.add_argument("--output-dir",  default=None,   help="Directory to write detections JSON (default: data/detections next to image)")
     parser.add_argument("--model-dir",   default=None,   help="Root directory containing models/ folder (default: two levels above this script)")
     parser.add_argument("--real-scores", default="false", help="Use real user-study privacy scores (true/false)")
     return parser.parse_args()
@@ -367,7 +365,7 @@ def main():
     base_dir    = args.model_dir or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     image_id    = os.path.splitext(os.path.basename(image_path))[0]
     output_dir  = args.output_dir or os.path.join(base_dir, "data", "detections")
-    output_path = os.path.join(output_dir, f"{image_id}.txt")
+    output_path = os.path.join(output_dir, f"{image_id}.json")
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"[CONFIG] image={image_path}, real_scores={use_real}, device={device}")
