@@ -26,12 +26,12 @@ The pipeline has two stages that run in separate Docker containers:
                                           │
                                           ▼
                                ┌─────────────────────┐
-                               │   abe-container      │
-                               │   enc_dec.py         │
-                               │                      │
-                               │  Fernet (AES) per    │
-                               │  sensitivity group   │
-                               │  wrapped under ABE   │
+                               │   abe-container     │
+                               │   enc_dec.py        │
+                               │                     │
+                               │  Fernet (AES) per   │
+                               │  sensitivity group  │
+                               │  wrapped under ABE  │
                                └─────────────────────┘
                                           │
                                           ▼
