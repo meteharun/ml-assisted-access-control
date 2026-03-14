@@ -15,28 +15,29 @@ The pipeline has two stages that run in separate Docker containers:
 [Input Image]
       │
       ▼
-┌─────────────────────┐        shared volume
-│   ml-container      │   data/detections/<id>.txt
-│   detect.py         │ ──────────────────────────────►
+┌─────────────────────┐
+│   ml-container      │
+│   detect.py         │
 │                     │
-│  OCR → DeBERTa      │   textual PSOs   (bounding boxes)
-│  YOLOv8 → CAPC      │   multimodal PSOs (bounding boxes)
-│  YOLOv8-Seg         │   visual PSOs    (pixel masks)
+│  OCR → DeBERTa      │  textual PSOs   (bounding boxes)
+│  YOLOv8 → CAPC      │  multimodal PSOs (bounding boxes)
+│  YOLOv8-Seg         │  visual PSOs    (pixel masks)
 └─────────────────────┘
-                                          │
-                                          ▼
-                               ┌─────────────────────┐
-                               │   abe-container     │
-                               │   enc_dec.py        │
-                               │                     │
-                               │  Fernet (AES) per   │
-                               │  sensitivity group  │
-                               │  wrapped under ABE  │
-                               └─────────────────────┘
-                                          │
-                                          ▼
-                               outputs/<id>_encrypted.png
-                               outputs/<id>_decrypted_abekey<N>.png
+          │
+          │  data/detections/<id>.txt
+          ▼
+┌─────────────────────┐
+│   abe-container     │
+│   enc_dec.py        │
+│                     │
+│  Fernet (AES) per   │
+│  sensitivity group  │
+│  wrapped under ABE  │
+└─────────────────────┘
+          │
+          ▼
+outputs/<id>_encrypted.png
+outputs/<id>_decrypted_abekey<N>.png
 ```
 
 The two stages are intentionally separated because `charm-crypto` (ABE) and the ML stack (PyTorch, PaddleOCR, YOLO) have incompatible dependencies and cannot share a single environment.
