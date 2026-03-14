@@ -111,11 +111,59 @@ class PESTOPACMAN:
 
     def load_detections(self) -> list:
         """
-        Load detections from JSON (written by detect.py).
-        Returns a list of dicts with keys: label, type, privacy_score, box/pixels.
+        Load detections from a .txt file (legacy format written by detect.py).
+        Each line: label, confidence, privacy_score, [[coords]], type
+        Returns a list of dicts with keys: label, type, confidence, privacy_score, box/pixels.
         """
+        import ast, re
+        detections = []
         with open(self.detections_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            content = f.read().strip()
+
+        # Rejoin multi-line entries (visual pixel lists span many lines)
+        entries = []
+        current = ""
+        for line in content.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            if re.match(r'^[a-zA-Z_\-]+,\s*[\d.]+,\s*[\d.]+,\s*\[', line) and current:
+                entries.append(current)
+                current = line
+            else:
+                current = (current + " " + line).strip() if current else line
+        if current:
+            entries.append(current)
+
+        for entry in entries:
+            entry = entry.strip()
+            if not entry:
+                continue
+            match = re.match(
+                r'^([a-zA-Z_\-]+),\s*([\d.]+),\s*([\d.]+),\s*(\[.*\]),\s*(\w+)$',
+                entry, re.DOTALL
+            )
+            if not match:
+                continue
+            label         = match.group(1).strip()
+            confidence    = float(match.group(2))
+            privacy_score = float(match.group(3))
+            coords        = ast.literal_eval(match.group(4).strip())
+            pso_type      = match.group(5).strip()
+
+            detection = {
+                "label":         label,
+                "type":          pso_type,
+                "confidence":    confidence,
+                "privacy_score": privacy_score,
+            }
+            if pso_type == "visual":
+                detection["pixels"] = coords
+            else:
+                detection["box"] = coords
+            detections.append(detection)
+
+        return detections
 
     # ── Encryption ────────────────────────────────────────────────────────────
 
@@ -317,7 +365,7 @@ def main():
     image_id = os.path.splitext(os.path.basename(image_path))[0]
 
     det_dir          = args.detections or os.path.join(os.path.dirname(os.path.dirname(image_path)), "detections")
-    detections_path  = to_native_path(os.path.join(det_dir, f"{image_id}.json"))
+    detections_path  = to_native_path(os.path.join(det_dir, f"{image_id}.txt"))
 
     print(f"[CONFIG] image={image_path}, real_scores={use_real}, detections={detections_path}")
 
