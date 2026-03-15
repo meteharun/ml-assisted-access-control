@@ -12,9 +12,9 @@ Full implementation details, experimental setup, and results are described in th
 The pipeline has two stages that run in separate Docker containers:
 
 ```
-[Input Image]
-      │
-      ▼
+    [Input Image]
+          │
+          ▼
 ┌─────────────────────┐
 │   ml-container      │
 │   detect.py         │
